@@ -1,0 +1,159 @@
+openapi: 3.1.0
+info:
+  title: Спутник Данные — Delivery Service API
+  description: |
+    Отдача купленных и подписных данных покупателям: выгрузки датасетов и живые потоки чтений.
+    Часть учебного демо-портала «Спутник Данные» (проект ДДЕ).
+  version: 1.0.0
+  x-service: delivery-service
+servers:
+  - url: http://localhost:8005/api/v1
+    description: Локальный запуск (профиль base/adv)
+security:
+  - bearerAuth: []
+tags:
+  - name: downloads
+    description: Выгрузка купленных датасетов
+  - name: streams
+    description: Живые потоки данных по подписке
+paths:
+  /datasets/{datasetId}/download:
+    get:
+      tags: [downloads]
+      summary: Выгрузка купленного датасета
+      operationId: downloadDataset
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+        - name: format
+          in: query
+          description: Формат выгрузки
+          schema:
+            $ref: '#/components/schemas/FileFormat'
+            default: CSV
+      responses:
+        '200':
+          description: Файл датасета
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /streams/{subscriptionId}:
+    get:
+      tags: [streams]
+      summary: Живой поток чтений по подписке (SSE)
+      operationId: openStream
+      parameters:
+        - $ref: '#/components/parameters/SubscriptionId'
+      responses:
+        '200':
+          description: Поток событий (server-sent events)
+          content:
+            text/event-stream:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    DatasetId:
+      name: datasetId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^ds_[a-z0-9_-]+$'
+        example: ds_weather-stations
+    SubscriptionId:
+      name: subscriptionId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^sub_[a-z0-9_-]+$'
+        example: sub_7a1b
+  schemas:
+    FileFormat:
+      type: string
+      enum: [CSV, JSON, PARQUET]
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: VALIDATION_ERROR
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  message: { type: string }
+                  code: { type: string }
+            requestId:
+              type: string
+              example: req_abc123
+  responses:
+    Unauthorized:
+      description: Отсутствует или невалидная аутентификация
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Недостаточно прав (продукт не куплен)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Непредвиденная ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

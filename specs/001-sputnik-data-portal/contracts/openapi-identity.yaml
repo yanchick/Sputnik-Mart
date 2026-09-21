@@ -1,0 +1,431 @@
+openapi: 3.1.0
+info:
+  title: Спутник Данные — Identity Service API
+  description: |
+    Вход по предсозданному демо-аккаунту, профиль покупателя и машинные ключи.
+    Часть учебного демо-портала «Спутник Данные» (проект ДДЕ).
+  version: 1.0.0
+  x-service: identity-service
+servers:
+  - url: http://localhost:8002/api/v1
+    description: Локальный запуск (профиль base/adv)
+security:
+  - bearerAuth: []
+tags:
+  - name: auth
+    description: Вход в портал
+  - name: users
+    description: Профиль покупателя, подписки и машинные ключи
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Вход по демо-аккаунту и выпуск Bearer-токена
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Успешный вход
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /users/me:
+    get:
+      tags: [users]
+      summary: Профиль текущего покупателя (email замаскирован)
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Профиль покупателя
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /users/{userId}/subscriptions:
+    get:
+      tags: [users]
+      summary: Подписки покупателя в личном кабинете
+      operationId: listUserSubscriptions
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /users/{userId}/api-keys:
+    get:
+      tags: [users]
+      summary: Список машинных ключей покупателя
+      operationId: listApiKeys
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Метаданные ключей без секретов
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApiKeyView'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [users]
+      summary: Выпустить машинный ключ (секрет показывается один раз)
+      operationId: createApiKey
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '201':
+          description: Ключ выпущен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyCreated'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /users/{userId}/api-keys/{keyId}:
+    delete:
+      tags: [users]
+      summary: Отозвать машинный ключ
+      operationId: revokeApiKey
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/KeyId'
+      responses:
+        '204':
+          description: Ключ отозван
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api-keys/resolve:
+    post:
+      tags: [users]
+      summary: Проверить машинный ключ (service-to-service)
+      description: |
+        Внутренний маршрут: возвращает владельца активного ключа или ``null``
+        для неизвестного/отозванного. Через gateway не маршрутизируется.
+      operationId: resolveApiKey
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApiKeyResolveRequest'
+      responses:
+        '200':
+          description: Результат проверки ключа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyResolution'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      description: Идентификатор покупателя (us_*)
+      schema:
+        type: string
+        example: us_demo_buyer
+    KeyId:
+      name: keyId
+      in: path
+      required: true
+      description: Идентификатор машинного ключа
+      schema:
+        type: string
+        example: ak_7a1b
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          minLength: 3
+          example: buyer@sputnik.demo
+        password:
+          type: string
+          minLength: 1
+          example: demo
+    UserProfile:
+      type: object
+      required: [userId, displayName, status, email, createdAt]
+      properties:
+        userId:
+          type: string
+          example: us_demo_buyer
+        displayName:
+          type: string
+          example: Демо-покупатель
+        status:
+          type: string
+          example: ACTIVE
+        email:
+          type: string
+          description: Email замаскирован до вида ``***@domain``
+          example: '***@sputnik.demo'
+        createdAt:
+          type: string
+          format: date-time
+    LoginResponse:
+      type: object
+      required: [accessToken, tokenType, expiresIn, user]
+      properties:
+        accessToken:
+          type: string
+          example: us_ZD...cafe
+        tokenType:
+          type: string
+          default: Bearer
+          example: Bearer
+        expiresIn:
+          type: integer
+          default: 3600
+          example: 3600
+        user:
+          $ref: '#/components/schemas/UserProfile'
+    SubscriptionStatus:
+      type: string
+      enum: [SUB_ACTIVE, SUB_PAUSED, SUB_CANCELLED]
+    SubscriptionView:
+      type: object
+      required: [subscriptionId, userId, datasetId, intervalSec, status, startedAt]
+      properties:
+        subscriptionId:
+          type: string
+          example: sub_7a1b
+        userId:
+          type: string
+          example: us_demo_buyer
+        datasetId:
+          type: string
+          example: ds_air-quality
+        intervalSec:
+          type: integer
+          example: 600
+        status:
+          $ref: '#/components/schemas/SubscriptionStatus'
+        startedAt:
+          type: string
+          format: date-time
+    ApiKeyView:
+      type: object
+      required: [keyId, keyPrefix, scopes, createdAt]
+      properties:
+        keyId:
+          type: string
+          example: ak_7a1b
+        keyPrefix:
+          type: string
+          example: sk_live_7a1b
+        scopes:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        revokedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+    ApiKeyCreated:
+      type: object
+      required: [keyId, keyPrefix, apiKey, scopes, createdAt]
+      properties:
+        keyId:
+          type: string
+          example: ak_7a1b
+        keyPrefix:
+          type: string
+          example: sk_live_7a1b
+        apiKey:
+          type: string
+          description: Открытый секрет показывается только при выпуске
+          example: sk_live_7a1b_0123456789abcdef
+        scopes:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+    ApiKeyResolveRequest:
+      type: object
+      required: [apiKey]
+      additionalProperties: false
+      properties:
+        apiKey:
+          type: string
+          minLength: 1
+          example: sk_live_7a1b_0123456789abcdef
+    ApiKeyResolution:
+      type: object
+      properties:
+        userId:
+          description: Владелец активного ключа или null
+          anyOf:
+            - type: string
+            - type: 'null'
+          example: us_demo_buyer
+    PagedResponse:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubscriptionView'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+    Pagination:
+      type: object
+      required: [page, pageSize, total, totalPages, hasMore]
+      properties:
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+        hasMore: { type: boolean }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: VALIDATION_ERROR
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                $ref: '#/components/schemas/ErrorDetail'
+            requestId:
+              type: string
+              example: req_abc123
+    ErrorDetail:
+      type: object
+      properties:
+        field:
+          type: string
+          example: email
+        message:
+          type: string
+        code:
+          type: string
+          example: INVALID_FORMAT
+  responses:
+    BadRequest:
+      description: Ошибка валидации или некорректный запрос
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Отсутствует или невалидная аутентификация
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Доступ только к собственным данным
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Rate limit exceeded — превышен лимит запросов (RATE_LIMITED)
+      headers:
+        Retry-After:
+          description: Секунды до повторной попытки
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Непредвиденная ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

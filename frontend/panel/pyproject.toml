@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sputnik-panel-shared"
+version = "0.1.0"
+description = "Спутник Данные — переиспользуемые Panel-компоненты и тема"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "panel>=1.4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/panel_shared"]

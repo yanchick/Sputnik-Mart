@@ -1,0 +1,55 @@
+# Спутник Данные — алерт деградации качества (T168, FR-026, SC-011).
+# Срабатывает, когда относительная деградация качества датасета превышает порог.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: sputnik-degradation
+    folder: Sputnik
+    interval: 1m
+    rules:
+      - uid: sputnik-quality-degradation
+        title: Деградация качества датасета
+        condition: C
+        for: 1m
+        annotations:
+          summary: "Качество датасета {{ $labels.dataset }} деградировало"
+          description: "sputnik_quality_degradation_ratio > 0.15 в течение минуты"
+        labels:
+          severity: warning
+          portal: sputnik-data
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: sputnik_quality_degradation_ratio
+              instant: false
+              intervalMs: 15000
+              legendFormat: "{{dataset}}"
+              range: true
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0.15]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              refId: C
+              type: threshold

@@ -1,0 +1,191 @@
+# Спутник Данные — обязательный CI-шлюз (T013, T014, T017, T173).
+# Жёсткие ворота: ruff/black/mypy, unit+coverage, contract, contract-lint и
+# сборка образов. Провал любого из них блокирует release-gate (FR-031).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    name: lint (ruff / black / mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Python and dependencies
+        run: |
+          uv python install ${{ env.PYTHON_VERSION }}
+          uv sync --all-packages --dev
+      - name: ruff
+        run: uv run ruff check .
+      - name: black
+        run: uv run black --check .
+      - name: mypy
+        run: uv run mypy .
+
+  unit:
+    name: unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Python and dependencies
+        run: |
+          uv python install ${{ env.PYTHON_VERSION }}
+          uv sync --all-packages --dev
+      - name: pytest (unit)
+        run: |
+          if [ -z "$(find tests/unit -name 'test_*.py' -print -quit)" ]; then
+            echo "No unit tests found — hard gate fails"
+            exit 1
+          fi
+          uv run pytest tests/unit -m unit --maxfail=1
+
+  coverage:
+    name: full suite + coverage gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Python and dependencies
+        run: |
+          uv python install ${{ env.PYTHON_VERSION }}
+          uv sync --all-packages --dev
+      - name: pytest (unit + contract + integration + e2e) with coverage
+        run: |
+          # `dags/` намеренно исключён из --cov: исполняется только под Airflow
+          # (обоснование — pyproject.toml [tool.coverage.run]); порог 80 сохранён.
+          uv run pytest tests/unit tests/contract tests/integration tests/e2e \
+            --cov=services --cov=libs --cov=generators \
+            --cov-report=xml --cov-report=term-missing \
+            --cov-fail-under=80
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore
+
+  contract:
+    name: contract tests (schemathesis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Python and dependencies
+        run: |
+          uv python install ${{ env.PYTHON_VERSION }}
+          uv sync --all-packages --dev
+      - name: pytest (contract)
+        run: |
+          if [ -z "$(find tests/contract -name 'test_*.py' -print -quit)" ]; then
+            echo "No contract tests found — hard gate fails"
+            exit 1
+          fi
+          uv run pytest tests/contract -m contract --maxfail=1
+
+  contract-lint:
+    name: OpenAPI / AsyncAPI contract lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Python and dependencies
+        run: |
+          uv python install ${{ env.PYTHON_VERSION }}
+          uv sync --all-packages --dev
+      - name: Lint contracts
+        run: uv run python scripts/contract_lint.py
+
+  image-build:
+    name: image build (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api-gateway
+            package: api_gateway
+          - service: catalog
+            package: catalog
+          - service: web-vitrina
+            package: web_vitrina
+          - service: identity
+            package: identity
+          - service: order
+            package: order
+          - service: review
+            package: review
+          - service: delivery
+            package: delivery
+          - service: sensor-gateway
+            package: sensor_gateway
+          - service: ingestion
+            package: ingestion
+          - service: validation
+            package: validation
+          - service: transform
+            package: transform
+          - service: quality
+            package: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/service.Dockerfile
+          push: false
+          build-args: |
+            SERVICE=${{ matrix.service }}
+            SERVICE_PKG=${{ matrix.package }}
+          tags: sputnik/${{ matrix.service }}:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release-gate:
+    name: release gate (hard)
+    runs-on: ubuntu-latest
+    needs: [lint, unit, coverage, contract, contract-lint, image-build]
+    if: always()
+    steps:
+      - name: Block release on any failed gate
+        run: |
+          echo "lint=${{ needs.lint.result }}"
+          echo "unit=${{ needs.unit.result }}"
+          echo "coverage=${{ needs.coverage.result }}"
+          echo "contract=${{ needs.contract.result }}"
+          echo "contract-lint=${{ needs.contract-lint.result }}"
+          echo "image-build=${{ needs.image-build.result }}"
+          if [ "${{ needs.lint.result }}" != "success" ] \
+            || [ "${{ needs.unit.result }}" != "success" ] \
+            || [ "${{ needs.coverage.result }}" != "success" ] \
+            || [ "${{ needs.contract.result }}" != "success" ] \
+            || [ "${{ needs.contract-lint.result }}" != "success" ] \
+            || [ "${{ needs.image-build.result }}" != "success" ]; then
+            echo "One or more required gates failed — release blocked (FR-031)"
+            exit 1
+          fi
+          echo "All hard gates passed"

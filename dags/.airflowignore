@@ -1,0 +1,5 @@
+# Спутник Данные — что Airflow не должен сканировать как DAGи.
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/

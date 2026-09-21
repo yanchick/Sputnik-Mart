@@ -1,0 +1,540 @@
+# Спутник Данные — инфраструктурный каркас (Phase 1, T010/T011).
+# Профили запуска:
+#   docker compose --profile base up   — MVP US1: postgres + redis
+#   docker compose --profile adv up    — US2/US3: + redpanda, minio, clickhouse, mongo
+#   docker compose --profile demo up   — сквозная приёмка M0–M4: всё вышеперечисленное
+name: sputnik
+
+x-profiles-all: &profiles-all [base, adv, demo]
+x-profiles-adv: &profiles-adv [adv, demo]
+x-profiles-demo: &profiles-demo [demo]
+
+# Общие env профилей (T054). Секреты берутся из окружения с демо-значениями.
+x-common-env: &common-env
+  ENVIRONMENT: ${ENVIRONMENT:-local}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  PROFILE: ${PROFILE:-base}
+  POSTGRES_URL: postgresql+asyncpg://${POSTGRES_USER:-sputnik}:${POSTGRES_PASSWORD:-sputnik}@postgres:5432/${POSTGRES_DB:-sputnik}
+  REDIS_URL: redis://redis:6379/0
+  PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY:-sputnik-demo-pii-key}
+  PII_RETENTION_MONTHS: ${PII_RETENTION_MONTHS:-12}
+
+x-adv-env: &adv-env
+  ENVIRONMENT: ${ENVIRONMENT:-local}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  PROFILE: ${PROFILE:-adv}
+  POSTGRES_URL: postgresql+asyncpg://${POSTGRES_USER:-sputnik}:${POSTGRES_PASSWORD:-sputnik}@postgres:5432/${POSTGRES_DB:-sputnik}
+  REDIS_URL: redis://redis:6379/0
+  KAFKA_BOOTSTRAP_SERVERS: redpanda:29092
+  CLICKHOUSE_HOST: clickhouse
+  CLICKHOUSE_PORT: "8123"
+  CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-sputnik}
+  MONGO_URI: mongodb://mongo:27017
+  MONGO_DATABASE: ${MONGO_DATABASE:-catalog_nosql}
+  MINIO_ENDPOINT: http://minio:9000
+  MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-sputnik}
+  MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-sputnik123}
+  MINIO_LAKE_BUCKET: ${MINIO_LAKE_BUCKET:-lake}
+  PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY:-sputnik-demo-pii-key}
+  PII_RETENTION_MONTHS: ${PII_RETENTION_MONTHS:-12}
+
+# Шаблон сборки сервисных образов (T012/T054).
+x-service-build: &service-build
+  context: .
+  dockerfile: infra/docker/service.Dockerfile
+
+# Сервисы Phase 2 — только каркас: entrypoint-заглушка (Phase 3 наполнит логику).
+x-service-base: &service-base
+  profiles: *profiles-all
+  restart: "no"
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+x-service-adv: &service-adv
+  profiles: *profiles-adv
+  restart: "no"
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    redpanda:
+      condition: service_healthy
+    minio:
+      condition: service_healthy
+    clickhouse:
+      condition: service_healthy
+    mongo:
+      condition: service_healthy
+
+# Одноразовая миграция схемы БД (Alembic) до старта сервисов и seed.
+x-migrate: &migrate
+  profiles: *profiles-all
+  restart: "no"
+  command: ["alembic", "-c", "libs/db/alembic.ini", "upgrade", "head"]
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    profiles: *profiles-all
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sputnik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sputnik}
+      POSTGRES_DB: ${POSTGRES_DB:-sputnik}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sputnik} -d ${POSTGRES_DB:-sputnik}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    profiles: *profiles-all
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  migrate:
+    <<: *migrate
+    build:
+      <<: *service-build
+      args: {SERVICE: identity, SERVICE_PKG: identity}
+    environment: *common-env
+
+  redpanda:
+    image: redpandadata/redpanda:v24.1.7
+    profiles: *profiles-adv
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --overprovisioned
+      - --node-id
+      - "0"
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+      - --rpc-addr
+      - 0.0.0.0:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    volumes:
+      - redpandadata:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+    restart: unless-stopped
+
+  redpanda-console:
+    image: redpandadata/console:v2.6.0
+    profiles: *profiles-adv
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: redpanda:29092
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-06-13T22-53-53Z
+    profiles: *profiles-adv
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-sputnik}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-sputnik123}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2024-06-12T14-34-03Z
+    profiles: *profiles-adv
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-sputnik} ${MINIO_ROOT_PASSWORD:-sputnik123} &&
+      mc mb --ignore-existing local/lake &&
+      mc mb --ignore-existing local/samples &&
+      mc mb --ignore-existing local/exports &&
+      echo 'MinIO buckets ready';
+      "
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    profiles: *profiles-adv
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8123:8123"
+      - "9009:9000"
+    volumes:
+      - clickhousedata:/var/lib/clickhouse
+      - ./infra/clickhouse:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    profiles: *profiles-adv
+    environment:
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-catalog_nosql}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" | grep 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # --- observability plane: Prometheus + Grafana (US4, T165–T168) ----------
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    profiles: *profiles-adv
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    profiles: *profiles-adv
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  # --- base plane: витрина, покупка, кабинет (US1) -------------------------
+  identity:
+    <<: *service-base
+    build:
+      <<: *service-build
+      args: {SERVICE: identity, SERVICE_PKG: identity}
+    environment:
+      <<: *common-env
+      SERVICE_URL_ORDER: http://order:8000
+    ports:
+      - "8002:8000"
+
+  catalog:
+    <<: *service-base
+    build:
+      <<: *service-build
+      args: {SERVICE: catalog, SERVICE_PKG: catalog}
+    environment:
+      <<: *common-env
+      SERVICE_URL_IDENTITY: http://identity:8000
+    ports:
+      - "8001:8000"
+
+  order:
+    <<: *service-base
+    build:
+      <<: *service-build
+      args: {SERVICE: order, SERVICE_PKG: order}
+    environment:
+      <<: *common-env
+      SERVICE_URL_CATALOG: http://catalog:8000
+    ports:
+      - "8003:8000"
+
+  delivery:
+    <<: *service-base
+    build:
+      <<: *service-build
+      args: {SERVICE: delivery, SERVICE_PKG: delivery}
+    environment:
+      <<: *common-env
+      SERVICE_URL_ORDER: http://order:8000
+      SERVICE_URL_IDENTITY: http://identity:8000
+      SERVICE_URL_CATALOG: http://catalog:8000
+    ports:
+      - "8005:8000"
+
+  review:
+    <<: *service-base
+    build:
+      <<: *service-build
+      args: {SERVICE: review, SERVICE_PKG: review}
+    environment: *common-env
+    ports:
+      - "8004:8000"
+
+  # Одноразовый seed профиля base: предсозданные аккаунты и датасеты (T100).
+  seed:
+    profiles: *profiles-all
+    build:
+      <<: *service-build
+      args: {SERVICE: sim, SERVICE_PKG: sim}
+    environment: *common-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # Предзаготовленные данные профиля demo (T174): датасеты, аккаунты, озеро.
+  demo-data:
+    profiles: *profiles-demo
+    build:
+      <<: *service-build
+      args: {SERVICE: sim, SERVICE_PKG: sim}
+    environment: *adv-env
+    command: ["python", "/app/scripts/prepare_demo_data.py", "--seed", "42"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    restart: "no"
+
+  api-gateway:
+    <<: *service-base
+    build:
+      <<: *service-build
+      args: {SERVICE: api-gateway, SERVICE_PKG: api_gateway}
+    environment:
+      <<: *common-env
+      SERVICE_URL_IDENTITY: http://identity:8000
+      SERVICE_URL_CATALOG: http://catalog:8000
+      SERVICE_URL_ORDER: http://order:8000
+      SERVICE_URL_DELIVERY: http://delivery:8000
+      SERVICE_URL_REVIEW: http://review:8000
+      SERVICE_URL_QUALITY: http://quality:8000
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      identity:
+        condition: service_started
+      catalog:
+        condition: service_started
+      order:
+        condition: service_started
+      delivery:
+        condition: service_started
+      review:
+        condition: service_started
+      quality:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+  web-vitrina:
+    <<: *service-base
+    build:
+      <<: *service-build
+      args: {SERVICE: web-vitrina, SERVICE_PKG: web_vitrina}
+    environment:
+      <<: *common-env
+      GATEWAY_URL: http://api-gateway:8000
+    depends_on:
+      api-gateway:
+        condition: service_started
+    ports:
+      - "8050:8000"
+
+  # --- adv plane: датчики, озеро, gold-витрины (US2/US3) -------------------
+  sensor-gateway:
+    <<: *service-adv
+    build:
+      <<: *service-build
+      args: {SERVICE: sensor-gateway, SERVICE_PKG: sensor_gateway}
+    environment: *adv-env
+    ports:
+      - "8006:8000"
+
+  ingestion:
+    <<: *service-adv
+    build:
+      <<: *service-build
+      args: {SERVICE: ingestion, SERVICE_PKG: ingestion}
+    environment: *adv-env
+
+  validation:
+    <<: *service-adv
+    build:
+      <<: *service-build
+      args: {SERVICE: validation, SERVICE_PKG: validation}
+    environment: *adv-env
+
+  transform:
+    <<: *service-adv
+    build:
+      <<: *service-build
+      args: {SERVICE: transform, SERVICE_PKG: transform}
+    environment: *adv-env
+
+  # Kafka-консьюмер commerce.* → gold-витрины (FR-019/FR-025). Отдельный
+  # процесс: длительно читает пять топиков и идемпотентно грузит mart_*.
+  commerce-transform:
+    <<: *service-adv
+    build:
+      <<: *service-build
+      args: {SERVICE: transform, SERVICE_PKG: transform}
+    environment: *adv-env
+    command: ["python", "-c", "from transform.commerce_consumer import main; main()"]
+    restart: unless-stopped
+
+  # Разовое удаление просроченного PII при старте профиля adv (FR-037, SC-013).
+  # Ежедневное расписание дублирует DAG retention_pii.
+  retention:
+    profiles: *profiles-adv
+    build:
+      <<: *service-build
+      args: {SERVICE: identity, SERVICE_PKG: identity}
+    environment: *adv-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    command: ["python", "-c", "from identity.retention import main; main()"]
+    restart: "no"
+
+  quality:
+    # Quality-page доступна во всех профилях (base читает каталог, adv/demo —
+    # ещё и отчёт validation из MinIO). Порт наружу не публикуется: вход через
+    # gateway, а write-эндпоинт пересчёта требует аутентификации (M4).
+    <<: *service-base
+    build:
+      <<: *service-build
+      args: {SERVICE: quality, SERVICE_PKG: quality}
+    environment:
+      <<: *adv-env
+      SERVICE_URL_CATALOG: http://catalog:8000
+      SERVICE_URL_IDENTITY: http://identity:8000
+
+  # --- оркестрация: локальный Airflow (T052) -------------------------------
+  airflow:
+    image: apache/airflow:2.9.3-python3.12
+    profiles: *profiles-adv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-sputnik}:${POSTGRES_PASSWORD:-sputnik}@postgres:5432/airflow
+      AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-admin}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
+      POSTGRES_URL: postgresql+asyncpg://${POSTGRES_USER:-sputnik}:${POSTGRES_PASSWORD:-sputnik}@postgres:5432/${POSTGRES_DB:-sputnik}
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:29092
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-sputnik}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-sputnik}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-sputnik123}
+      MINIO_LAKE_BUCKET: ${MINIO_LAKE_BUCKET:-lake}
+      SERVICE_URL_CATALOG: http://catalog:8000
+      _PIP_ADDITIONAL_REQUIREMENTS: "httpx>=0.27"
+      PYTHONPATH: /opt/airflow/libs/contracts/src:/opt/airflow/libs/config/src:/opt/airflow/libs/db/src:/opt/airflow/libs/observability/src:/opt/airflow/libs/service-client/src:/opt/airflow/services/identity/src:/opt/airflow/services/sensor-gateway/src:/opt/airflow/services/ingestion/src:/opt/airflow/services/validation/src:/opt/airflow/services/transform/src:/opt/airflow/services/quality/src:/opt/airflow/generators/sim/src
+    volumes:
+      - ./dags:/opt/airflow/dags:ro
+      - ./libs:/opt/airflow/libs:ro
+      - ./services:/opt/airflow/services:ro
+      - ./generators:/opt/airflow/generators:ro
+      - airflowlogs:/opt/airflow/logs
+    ports:
+      - "8081:8080"
+    command: >
+      bash -c "airflow db migrate &&
+      (airflow users create --username $$AIRFLOW_ADMIN_USER --password $$AIRFLOW_ADMIN_PASSWORD
+      --firstname Admin --lastname User --role Admin --email admin@sputnik.demo || true) &&
+      airflow scheduler & airflow webserver"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  redpandadata:
+  miniodata:
+  clickhousedata:
+  mongodata:
+  airflowlogs:
+  promdata:
+  grafanadata:

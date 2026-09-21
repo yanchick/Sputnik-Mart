@@ -1,0 +1,287 @@
+openapi: 3.1.0
+info:
+  title: Спутник Данные — Quality Service API
+  description: |
+    Рейтинг качества датасетов: срез для Quality-page и операторский пересчёт
+    ``qualityScore`` из отчётов validation. Часть учебного демо-портала
+    «Спутник Данные» (проект ДДЕ).
+  version: 1.0.0
+  x-service: quality-service
+servers:
+  - url: http://localhost:8007/api/v1
+    description: Локальный запуск (профиль base/adv), доступ через gateway
+security:
+  - bearerAuth: []
+tags:
+  - name: quality
+    description: Качество датасетов и операторский пересчёт
+paths:
+  /quality:
+    get:
+      tags: [quality]
+      summary: Срез качества всех датасетов каталога
+      operationId: listQualitySnapshots
+      security: []
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityListResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /quality/{datasetId}:
+    get:
+      tags: [quality]
+      summary: Срез качества одного датасета
+      operationId: getQualitySnapshot
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      responses:
+        '200':
+          description: Срез качества
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualitySnapshot'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /quality/recalculate:
+    post:
+      tags: [quality]
+      summary: Пересчитать qualityScore по отчётам (только оператор)
+      operationId: recalculateQuality
+      security:
+        - bearerAuth: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecalculateQualityRequest'
+      responses:
+        '200':
+          description: Итог пересчёта
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecalculateQualityResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+  parameters:
+    DatasetId:
+      name: datasetId
+      in: path
+      required: true
+      description: Идентификатор продукта (ds_*)
+      schema:
+        type: string
+        pattern: '^ds_[a-z0-9_-]+$'
+        example: ds_weather-stations
+  schemas:
+    QualitySnapshot:
+      type: object
+      required:
+        - datasetId
+        - name
+        - qualityScore
+        - missingRate
+        - dupRate
+        - outlierRate
+        - anomaliesCnt
+        - dt
+      properties:
+        datasetId:
+          type: string
+          example: ds_weather-stations
+        name:
+          type: string
+          example: Метеостанции города
+        qualityScore:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          example: 0.92
+        missingRate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          example: 0.01
+        dupRate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          example: 0.0
+        outlierRate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          example: 0.0
+        anomaliesCnt:
+          type: integer
+          minimum: 0
+          example: 0
+        dt:
+          description: Дата последнего отчёта качества (null, если отчёта нет)
+          anyOf:
+            - type: string
+              format: date
+            - type: 'null'
+    QualityListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/QualitySnapshot'
+    QualityReportInput:
+      type: object
+      description: |
+        Отчёт validation по датасету. Ключи сохранены в snake_case, как их
+        формирует validation-service (``report.json``); допустим любой набор
+        показателей — отсутствующие считаются нулевыми, лишние игнорируются.
+      properties:
+        quality_score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        missing_rate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        dup_rate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        outlier_rate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        gap_rate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        anomalies_cnt:
+          type: integer
+          minimum: 0
+    RecalculateQualityRequest:
+      type: object
+      properties:
+        datasets:
+          type: object
+          description: Карта ``datasetId`` → отчёт validation
+          additionalProperties:
+            $ref: '#/components/schemas/QualityReportInput'
+    RecalculateQualityResponse:
+      type: object
+      required: [updated, count]
+      properties:
+        updated:
+          type: array
+          items:
+            type: string
+          example: [ds_weather-stations]
+        count:
+          type: integer
+          minimum: 0
+          example: 1
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: UNAUTHORIZED
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                $ref: '#/components/schemas/ErrorDetail'
+            requestId:
+              type: string
+              example: req_abc123
+    ErrorDetail:
+      type: object
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+        code:
+          type: string
+  responses:
+    BadRequest:
+      description: Некорректный JSON или тело запроса
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Требуется аутентификация оператора (Bearer или X-Api-Key)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Датасет не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Rate limit exceeded — превышен лимит запросов (RATE_LIMITED)
+      headers:
+        Retry-After:
+          description: Секунды до повторной попытки
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Непредвиденная ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

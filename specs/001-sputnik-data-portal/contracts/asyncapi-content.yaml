@@ -1,0 +1,123 @@
+asyncapi: 3.0.0
+info:
+  title: Спутник Данные — Content Events (датчики)
+  description: |
+    Поток показаний датчиков и битых записей (DLQ). «Товары», продаваемые маркетплейсом.
+    Часть учебного демо-портала «Спутник Данные» (проект ДДЕ).
+  version: 1.0.0
+  x-note: Валидные показания публикует sensor-gateway (от генераторов), читает ingestion-service (bronze). В ``sensors.readings.dlq`` пишут sensor-gateway (записи, отклонённые на приёме), ingestion-service (дубли/ядовитые сообщения) и validation-service (повторная отбраковка).
+defaultContentType: application/json
+servers:
+  kafka:
+    host: localhost:9092
+    protocol: kafka
+    description: Redpanda (Kafka) локально
+operations:
+  publishReading:
+    action: send
+    channel:
+      $ref: '#/channels/sensors.readings.v1'
+  publishDlq:
+    action: send
+    channel:
+      $ref: '#/channels/sensors.readings.dlq'
+    description: Публикуют sensor-gateway (ошибки приёма) и ingestion-service (дубли/ядовитые)
+  consumeReadings:
+    action: receive
+    channel:
+      $ref: '#/channels/sensors.readings.v1'
+  consumeDlq:
+    action: receive
+    channel:
+      $ref: '#/channels/sensors.readings.dlq'
+channels:
+  sensors.readings.v1:
+    address: sensors.readings.v1
+    description: Валидные/сырые показания датчиков от провайдеров
+    messages:
+      SensorReading:
+        $ref: '#/components/messages/SensorReading'
+  sensors.readings.dlq:
+    address: sensors.readings.dlq
+    description: |
+      Битые записи, отброшенные при приёме (sensor-gateway) или обработке
+      (ingestion/validation), для разбора на практиках.
+    messages:
+      DeadReading:
+        $ref: '#/components/messages/DeadReading'
+components:
+  messages:
+    SensorReading:
+      messageId: SensorReading
+      name: SensorReading
+      title: Показание датчика
+      payload:
+        $ref: '#/components/schemas/SensorReadingPayload'
+    DeadReading:
+      messageId: DeadReading
+      name: DeadReading
+      title: Битое показание
+      payload:
+        $ref: '#/components/schemas/DeadReadingPayload'
+  schemas:
+    SensorReadingPayload:
+      type: object
+      required: [readingId, stationId, providerId, metric, value, unit, measuredAt, receivedAt]
+      properties:
+        readingId:
+          type: string
+          example: rd_9f2c
+        stationId:
+          type: string
+          example: st_metro-01
+        providerId:
+          type: string
+          example: pv_metro
+        metric:
+          $ref: '#/components/schemas/Metric'
+        value:
+          type: number
+          format: double
+          example: 18.4
+        unit:
+          type: string
+          example: C
+        geo:
+          $ref: '#/components/schemas/GeoPoint'
+        measuredAt:
+          type: string
+          format: date-time
+        receivedAt:
+          type: string
+          format: date-time
+    DeadReadingPayload:
+      type: object
+      required: [readingId, reason, raw]
+      properties:
+        readingId:
+          type: string
+          example: rd_bad_3
+        reason:
+          type: string
+          enum: [NULL_VALUE, OUT_OF_RANGE, SCHEMA_MISMATCH, DUPLICATE]
+          example: OUT_OF_RANGE
+        raw:
+          type: object
+          additionalProperties: true
+          description: Исходная битая запись
+    Metric:
+      type: string
+      enum: [TEMPERATURE, HUMIDITY, PRESSURE, PM2_5, PM10, NOISE, ENERGY_KWH, TRAFFIC_FLOW]
+      example: TEMPERATURE
+    GeoPoint:
+      type: object
+      required: [lat, lon]
+      properties:
+        lat:
+          type: number
+          format: double
+          example: 59.93
+        lon:
+          type: number
+          format: double
+          example: 30.31

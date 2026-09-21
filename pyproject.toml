@@ -1,0 +1,186 @@
+[project]
+name = "sputnikmart"
+version = "0.1.0"
+description = "Демо-портал маркетплейса данных «Спутник Данные» (монорепозиторий)"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[tool.uv]
+# Корень рабочего пространства — виртуальный проект, не устанавливается как пакет.
+package = false
+
+[tool.uv.workspace]
+members = ["services/*", "libs/*", "generators/sim", "frontend/panel"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "black>=24.4",
+    "mypy>=1.10",
+    "pydantic>=2.7",
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "testcontainers>=4.5",
+    "schemathesis>=3.30",
+    "pyyaml>=6.0",
+    "jsonschema>=4.22",
+    "openapi-spec-validator>=0.7",
+    "types-pyyaml>=6.0",
+]
+
+# --- ruff (T005) -----------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["services", "libs", "generators", "tests", "scripts", "dags", "frontend/panel/src"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",   # длина строки контролируется black
+    "RUF001", # неоднозначные unicode-символы: документация на русском
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "contracts",
+    "config",
+    "db",
+    "observability",
+    "panel_shared",
+    "service_client",
+    "sim",
+    "sensor_gateway",
+    "ingestion",
+    "validation",
+    "transform",
+    "quality",
+]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Header",
+    "fastapi.Body",
+    "fastapi.Form",
+    "fastapi.File",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]
+"**/repository.py" = ["RUF012"]
+
+# --- black (T006) ----------------------------------------------------------
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+extend-exclude = "(\\.venv|build|dist|node_modules)"
+
+# --- mypy (T007) -----------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "$MYPY_CONFIG_FILE_DIR/libs/contracts/src:$MYPY_CONFIG_FILE_DIR/libs/config/src:$MYPY_CONFIG_FILE_DIR/libs/db/src:$MYPY_CONFIG_FILE_DIR/libs/observability/src:$MYPY_CONFIG_FILE_DIR/libs/service-client/src:$MYPY_CONFIG_FILE_DIR/generators/sim/src:$MYPY_CONFIG_FILE_DIR/frontend/panel/src:$MYPY_CONFIG_FILE_DIR/services/identity/src:$MYPY_CONFIG_FILE_DIR/services/catalog/src:$MYPY_CONFIG_FILE_DIR/services/order/src:$MYPY_CONFIG_FILE_DIR/services/review/src:$MYPY_CONFIG_FILE_DIR/services/delivery/src:$MYPY_CONFIG_FILE_DIR/services/api-gateway/src:$MYPY_CONFIG_FILE_DIR/services/web-vitrina/src:$MYPY_CONFIG_FILE_DIR/services/sensor-gateway/src:$MYPY_CONFIG_FILE_DIR/services/ingestion/src:$MYPY_CONFIG_FILE_DIR/services/validation/src:$MYPY_CONFIG_FILE_DIR/services/transform/src:$MYPY_CONFIG_FILE_DIR/services/quality/src:$MYPY_CONFIG_FILE_DIR/dags:$MYPY_CONFIG_FILE_DIR/tests"
+explicit_package_bases = true
+namespace_packages = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = [
+    "tests.*",
+    "conftest",
+    "support",
+    "contract.*",
+    "integration.*",
+    "unit.*",
+]
+disallow_untyped_defs = false
+disable_error_code = ["untyped-decorator"]
+
+[[tool.mypy.overrides]]
+# Panel/Bokeh частично типизированы: конструкторы виджетов без аннотаций.
+module = ["web_vitrina", "web_vitrina.*", "panel_shared", "panel_shared.*"]
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+module = ["aiokafka", "aiokafka.*", "asyncpg", "asyncpg.*", "boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "panel",
+    "panel.*",
+    "bokeh",
+    "bokeh.*",
+    "pandas",
+    "pandas.*",
+    "pyarrow",
+    "pyarrow.*",
+    "httpx_sse",
+    "httpx_sse.*",
+    "pandera",
+    "pandera.*",
+    "great_expectations",
+    "great_expectations.*",
+    "airflow",
+    "airflow.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Airflow DAG-файлы: декораторы и контекст исполнения не типизированы по проекту.
+module = ["dags", "dags.*", "ingest_readings", "refresh_quality", "sync_provider_exports", "deliver_subscription", "retention_pii"]
+disallow_untyped_defs = false
+warn_unused_ignores = false
+
+# --- pytest (T008) ---------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.2"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "--strict-markers --strict-config -ra"
+markers = [
+    "unit: unit-тесты",
+    "contract: контрактные тесты",
+    "integration: интеграционные тесты",
+    "e2e: сквозные тесты",
+]
+
+# --- coverage (T017, m11) --------------------------------------------------
+[tool.coverage.run]
+branch = true
+# `dags/` НАМЕРЕННО не входит в source/--cov (m11): DAG-модули исполняет
+# планировщик Airflow, которого нет в dev-зависимостях (`airflow` пропущен в
+# mypy overrides), а их тонкая обвязка требует Kafka/MinIO/ClickHouse. Тестируемая
+# логика вынесена в `services/`/`libs/`; DAGи покрыты unit-тестами чистых функций
+# и e2e-прогоном на живом стеке. Исключение продублировано в `.github/workflows/ci.yml`.
+source = ["services", "libs", "generators"]
+
+[tool.coverage.report]
+fail_under = 80
+precision = 2
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"

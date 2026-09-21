@@ -1,0 +1,193 @@
+asyncapi: 3.0.0
+info:
+  title: Спутник Данные — Commerce Events
+  description: |
+    События бизнеса маркетплейса данных: клики, заказы, подписки, скачивания, отзывы.
+    Часть учебного демо-портала «Спутник Данные» (проект ДДЕ).
+  version: 1.0.0
+  x-note: Топики публикуют catalog/order/review-сервисы, читают оркестрация и витрины.
+defaultContentType: application/json
+servers:
+  kafka:
+    host: localhost:9092
+    protocol: kafka
+    description: Redpanda (Kafka) локально
+operations:
+  publishClick:
+    action: send
+    channel:
+      $ref: '#/channels/commerce.clicks'
+  publishOrder:
+    action: send
+    channel:
+      $ref: '#/channels/commerce.orders'
+  publishSubscription:
+    action: send
+    channel:
+      $ref: '#/channels/commerce.subscriptions'
+  publishDownload:
+    action: send
+    channel:
+      $ref: '#/channels/commerce.downloads'
+  publishReview:
+    action: send
+    channel:
+      $ref: '#/channels/commerce.reviews'
+  consumeCommerce:
+    action: receive
+    channel:
+      $ref: '#/channels/commerce.clicks'
+channels:
+  commerce.clicks:
+    address: commerce.clicks
+    description: Просмотр карточки/образца продукта
+    messages:
+      ClickEvent:
+        $ref: '#/components/messages/ClickEvent'
+  commerce.orders:
+    address: commerce.orders
+    description: Покупка датасета
+    messages:
+      OrderEvent:
+        $ref: '#/components/messages/OrderEvent'
+  commerce.subscriptions:
+    address: commerce.subscriptions
+    description: Подписка на поток данных (запускает доставку)
+    messages:
+      SubscriptionEvent:
+        $ref: '#/components/messages/SubscriptionEvent'
+  commerce.downloads:
+    address: commerce.downloads
+    description: Выгрузка датасета
+    messages:
+      DownloadEvent:
+        $ref: '#/components/messages/DownloadEvent'
+  commerce.reviews:
+    address: commerce.reviews
+    description: Отзыв о качестве данных (commerce + NLP-корпус)
+    messages:
+      ReviewEvent:
+        $ref: '#/components/messages/ReviewEvent'
+components:
+  messages:
+    ClickEvent:
+      messageId: ClickEvent
+      name: ClickEvent
+      title: Клик
+      payload:
+        $ref: '#/components/schemas/ClickEventPayload'
+    OrderEvent:
+      messageId: OrderEvent
+      name: OrderEvent
+      title: Заказ
+      payload:
+        $ref: '#/components/schemas/OrderEventPayload'
+    SubscriptionEvent:
+      messageId: SubscriptionEvent
+      name: SubscriptionEvent
+      title: Подписка
+      payload:
+        $ref: '#/components/schemas/SubscriptionEventPayload'
+    DownloadEvent:
+      messageId: DownloadEvent
+      name: DownloadEvent
+      title: Скачивание
+      payload:
+        $ref: '#/components/schemas/DownloadEventPayload'
+    ReviewEvent:
+      messageId: ReviewEvent
+      name: ReviewEvent
+      title: Отзыв
+      payload:
+        $ref: '#/components/schemas/ReviewEventPayload'
+  schemas:
+    EventEnvelope:
+      type: object
+      required: [eventId, userId, at]
+      properties:
+        eventId:
+          type: string
+          example: ev_9f2c
+        userId:
+          type: string
+          example: us_42
+        at:
+          type: string
+          format: date-time
+    ClickEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          required: [datasetId, source]
+          properties:
+            datasetId:
+              type: string
+              example: ds_weather-stations
+            source:
+              type: string
+              enum: [STORE, SAMPLE, DOCS]
+    OrderEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          required: [orderId, datasetId, amount]
+          properties:
+            orderId:
+              type: string
+              example: od_7a1b
+            datasetId:
+              type: string
+              example: ds_weather-stations
+            amount:
+              type: number
+              format: double
+              example: 1200.0
+    SubscriptionEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          required: [subscriptionId, datasetId, intervalSec]
+          properties:
+            subscriptionId:
+              type: string
+              example: sub_7a1b
+            datasetId:
+              type: string
+              example: ds_air-quality
+            intervalSec:
+              type: integer
+              example: 300
+    DownloadEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          required: [downloadId, datasetId, format]
+          properties:
+            downloadId:
+              type: string
+              example: dl_5c3d
+            datasetId:
+              type: string
+              example: ds_weather-stations
+            format:
+              type: string
+              enum: [CSV, JSON, PARQUET]
+    ReviewEventPayload:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          required: [reviewId, datasetId, rating, text]
+          properties:
+            reviewId:
+              type: string
+              example: rv_8e1f
+            datasetId:
+              type: string
+              example: ds_air-quality
+            rating:
+              type: integer
+              minimum: 1
+              maximum: 5
+            text:
+              type: string
+              example: Данные чистые, но бывают редкие пропуски.

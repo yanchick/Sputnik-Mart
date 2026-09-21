@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sputnik-validation"
+version = "0.1.0"
+description = "Спутник Данные — пакет validation"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "sputnik-contracts",
+  "sputnik-config",
+  "sputnik-observability",
+  "sputnik-db",
+  "pandas>=2.2",
+  "numpy>=1.26",
+  "pyarrow>=17.0",
+  "pandera>=0.23",
+  "great-expectations>=1.0",
+]
+
+[tool.uv.sources]
+sputnik-contracts = { workspace = true }
+sputnik-config = { workspace = true }
+sputnik-observability = { workspace = true }
+sputnik-db = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/validation"]

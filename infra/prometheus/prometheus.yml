@@ -1,0 +1,27 @@
+# Спутник Данные — scrape-конфиг Prometheus (T165, FR-026).
+# Метрики лага консьюмеров, свежести витрин и деградации качества отдают
+# quality-service и sensor-gateway; дашборд Grafana — lag_freshness.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    portal: sputnik-data
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: quality
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["quality:8000"]
+        labels:
+          service: quality
+
+  - job_name: sensor-gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["sensor-gateway:8000"]
+        labels:
+          service: sensor-gateway

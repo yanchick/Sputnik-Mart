@@ -1,0 +1,270 @@
+openapi: 3.1.0
+info:
+  title: Спутник Данные — Review Service API
+  description: |
+    Отзывы покупателей об датасетах и агрегированный рейтинг продукта.
+    Часть учебного демо-портала «Спутник Данные» (проект ДДЕ).
+  version: 1.0.0
+  x-service: review-service
+servers:
+  - url: http://localhost:8004/api/v1
+    description: Локальный запуск (профиль base/adv)
+security:
+  - bearerAuth: []
+tags:
+  - name: reviews
+    description: Отзывы и рейтинг датасетов
+paths:
+  /reviews:
+    get:
+      tags: [reviews]
+      summary: Постраничный список отзывов датасета
+      operationId: listReviews
+      parameters:
+        - $ref: '#/components/parameters/DatasetIdQuery'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [reviews]
+      summary: Оставить отзыв (оценка 1–5)
+      operationId: createReview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReviewRequest'
+      responses:
+        '201':
+          description: Отзыв создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewEventPayload'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /datasets/{datasetId}/rating:
+    get:
+      tags: [reviews]
+      summary: Агрегированный рейтинг датасета
+      operationId: getDatasetRating
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+      responses:
+        '200':
+          description: Рейтинг по последнему отзыву каждого покупателя
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetRating'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    DatasetId:
+      name: datasetId
+      in: path
+      required: true
+      description: Идентификатор продукта (ds_*)
+      schema:
+        type: string
+        pattern: '^ds_[a-z0-9_-]+$'
+        example: ds_weather-stations
+    DatasetIdQuery:
+      name: datasetId
+      in: query
+      required: true
+      description: Идентификатор продукта (ds_*)
+      schema:
+        type: string
+        minLength: 1
+        pattern: '^ds_[a-z0-9_-]+$'
+        example: ds_weather-stations
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  schemas:
+    CreateReviewRequest:
+      type: object
+      required: [datasetId, rating]
+      additionalProperties: false
+      properties:
+        datasetId:
+          type: string
+          pattern: '^ds_[a-z0-9_-]+$'
+          example: ds_weather-stations
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          example: 5
+        text:
+          anyOf:
+            - type: string
+            - type: 'null'
+    ReviewEventPayload:
+      type: object
+      required: [eventId, userId, at, reviewId, datasetId, rating, text]
+      properties:
+        eventId:
+          type: string
+          example: rv_8e1f
+        userId:
+          type: string
+          example: us_demo_buyer
+        at:
+          type: string
+          format: date-time
+        reviewId:
+          type: string
+          example: rv_8e1f
+        datasetId:
+          type: string
+          example: ds_weather-stations
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          example: 5
+        text:
+          type: string
+          example: Данные чистые, но бывают редкие пропуски.
+    DatasetRating:
+      type: object
+      required: [datasetId, rating, reviewsCount]
+      properties:
+        datasetId:
+          type: string
+          example: ds_weather-stations
+        rating:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 5
+          example: 4.5
+        reviewsCount:
+          type: integer
+          minimum: 0
+          example: 3
+    PagedResponse:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewEventPayload'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+    Pagination:
+      type: object
+      required: [page, pageSize, total, totalPages, hasMore]
+      properties:
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+        hasMore: { type: boolean }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: VALIDATION_ERROR
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                $ref: '#/components/schemas/ErrorDetail'
+            requestId:
+              type: string
+              example: req_abc123
+    ErrorDetail:
+      type: object
+      properties:
+        field:
+          type: string
+          example: rating
+        message:
+          type: string
+        code:
+          type: string
+          example: INVALID_FORMAT
+  responses:
+    BadRequest:
+      description: Ошибка валидации или некорректный запрос
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Отсутствует или невалидная аутентификация
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Rate limit exceeded — превышен лимит запросов (RATE_LIMITED)
+      headers:
+        Retry-After:
+          description: Секунды до повторной попытки
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Непредвиденная ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

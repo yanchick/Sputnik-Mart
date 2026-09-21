@@ -1,0 +1,12 @@
+# Спутник Данные — провайдер дашбордов Grafana (T167).
+apiVersion: 1
+providers:
+  - name: Sputnik
+    orgId: 1
+    folder: Sputnik
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

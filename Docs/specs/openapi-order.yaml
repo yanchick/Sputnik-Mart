@@ -1,0 +1,255 @@
+openapi: 3.1.0
+info:
+  title: Спутник Данные — Order Service API
+  description: |
+    Заказы и подписки покупателей маркетплейса данных.
+    Часть учебного демо-портала «Спутник Данные» (проект ДДЕ).
+  version: 1.0.0
+  x-service: order-service
+servers:
+  - url: http://localhost:8003/api/v1
+    description: Локальный запуск (профиль base/adv)
+security:
+  - bearerAuth: []
+tags:
+  - name: orders
+    description: Заказы на покупку датасетов
+  - name: subscriptions
+    description: Подписки на потоки данных
+paths:
+  /orders:
+    post:
+      tags: [orders]
+      summary: Создать заказ (покупка датасета)
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Заказ создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [orders]
+      summary: Список заказов текущего покупателя
+      operationId: listOrders
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /subscriptions:
+    post:
+      tags: [subscriptions]
+      summary: Оформить подписку на поток данных
+      operationId: createSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubscriptionRequest'
+      responses:
+        '201':
+          description: Подписка создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  schemas:
+    CreateOrderRequest:
+      type: object
+      required: [datasetId]
+      properties:
+        datasetId:
+          type: string
+          pattern: '^ds_[a-z0-9_-]+$'
+          example: ds_weather-stations
+        quantity:
+          type: integer
+          minimum: 1
+          default: 1
+    CreateSubscriptionRequest:
+      type: object
+      required: [datasetId, intervalSec]
+      properties:
+        datasetId:
+          type: string
+          pattern: '^ds_[a-z0-9_-]+$'
+          example: ds_air-quality
+        intervalSec:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          example: 300
+    Order:
+      type: object
+      required: [orderId, userId, datasetId, status, createdAt]
+      properties:
+        orderId:
+          type: string
+          example: od_7a1b
+        userId:
+          type: string
+          example: us_42
+        datasetId:
+          type: string
+          example: ds_weather-stations
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        amount:
+          type: number
+          format: double
+          example: 1200.0
+        createdAt:
+          type: string
+          format: date-time
+    Subscription:
+      type: object
+      required: [subscriptionId, userId, datasetId, intervalSec, status, startedAt]
+      properties:
+        subscriptionId:
+          type: string
+          example: sub_7a1b
+        userId:
+          type: string
+          example: us_42
+        datasetId:
+          type: string
+          example: ds_air-quality
+        intervalSec:
+          type: integer
+          example: 300
+        status:
+          $ref: '#/components/schemas/SubscriptionStatus'
+        startedAt:
+          type: string
+          format: date-time
+    OrderStatus:
+      type: string
+      enum: [ORDER_PENDING, ORDER_PAID, ORDER_FULFILLED, ORDER_CANCELLED]
+    SubscriptionStatus:
+      type: string
+      enum: [SUB_ACTIVE, SUB_PAUSED, SUB_CANCELLED]
+    PagedResponse:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/Order'
+              - $ref: '#/components/schemas/Subscription'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+    Pagination:
+      type: object
+      required: [page, pageSize, totalItems, totalPages]
+      properties:
+        page: { type: integer }
+        pageSize: { type: integer }
+        totalItems: { type: integer }
+        totalPages: { type: integer }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: VALIDATION_ERROR
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  message: { type: string }
+                  code: { type: string }
+            requestId:
+              type: string
+              example: req_abc123
+  responses:
+    BadRequest:
+      description: Ошибка валидации или некорректный запрос
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Отсутствует или невалидная аутентификация
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Конфликт состояния (дубль, несовместимое состояние)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Непредвиденная ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
