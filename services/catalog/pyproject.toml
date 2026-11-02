@@ -12,6 +12,7 @@ dependencies = [
   "sputnik-config",
   "sputnik-observability",
   "sputnik-db",
+  "sputnik-service-client",
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
   "httpx>=0.27",
@@ -23,6 +24,7 @@ sputnik-contracts = { workspace = true }
 sputnik-config = { workspace = true }
 sputnik-observability = { workspace = true }
 sputnik-db = { workspace = true }
+sputnik-service-client = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/catalog"]

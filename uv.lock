@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.12.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -1745,6 +1745,7 @@ dependencies = [
     { name = "sputnik-contracts" },
     { name = "sputnik-db" },
     { name = "sputnik-observability" },
+    { name = "sputnik-service-client" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -1757,6 +1758,7 @@ requires-dist = [
     { name = "sputnik-contracts", editable = "libs/contracts" },
     { name = "sputnik-db", editable = "libs/db" },
     { name = "sputnik-observability", editable = "libs/observability" },
+    { name = "sputnik-service-client", editable = "libs/service-client" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 

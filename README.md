@@ -47,6 +47,8 @@ http://localhost:8000/docs. Остановить: `docker compose --profile base
 | Grafana | 3000 | MinIO Console | 9001 |
 | ClickHouse | 8123 | PostgreSQL | 5432 |
 
+Порт Grafana можно переопределить: `GRAFANA_PORT=3300 docker compose --profile adv up -d`.
+
 ## Разработка
 
 ```bash

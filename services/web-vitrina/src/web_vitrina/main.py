@@ -41,12 +41,34 @@ def create_app(client: GatewayClient | None = None) -> Any:
     return pn.Column(pn.pane.Markdown("# Спутник Данные — витрина"), tabs)
 
 
+def _resolve_websocket_origins(port: int) -> list[str]:
+    """Разрешённые origin для WebSocket: ``BOKEH_ALLOW_WS_ORIGIN`` или loopback.
+
+    Panel/Bokeh по умолчанию допускают только ``localhost:<port>``, поэтому
+    доступ по ``127.0.0.1`` (частый случай в Docker) требует явного списка.
+    Переменная окружения содержит origin через запятую — ровно так, как её
+    понимает сам Bokeh.
+    """
+    raw = os.environ.get("BOKEH_ALLOW_WS_ORIGIN", "")
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    if origins:
+        return origins
+    return [f"localhost:{port}", f"127.0.0.1:{port}"]
+
+
 def main() -> None:
     """Запустить Panel-сервер фасада."""
     configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
     _log.info("service_started", service="web-vitrina")
     port = int(os.environ.get("SERVICE_PORT", "8000"))
-    pn.serve(create_app(), address="0.0.0.0", port=port, show=False, title="Спутник Данные")
+    pn.serve(
+        create_app(),
+        address="0.0.0.0",
+        port=port,
+        show=False,
+        title="Спутник Данные",
+        websocket_origin=_resolve_websocket_origins(port),
+    )
 
 
 __all__ = ["DEFAULT_DATASET_ID", "create_app", "main"]
