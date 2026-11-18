@@ -1,8 +1,9 @@
 # Спутник Данные
 
 Монорепозиторий демо-портала маркетплейса данных «Спутник Данные» (проект ДДЕ).
-Стек: Python 3.12 + `uv`, FastAPI, Redpanda (Kafka API), MinIO, ClickHouse,
-MongoDB, PostgreSQL, Redis, Apache Airflow и фасад на Panel (HoloViz).
+Стек: Python 3.12 + `uv`, FastAPI, Redpanda (Kafka API),
+Silo (MinIO-совместимый, Docker Hub), ClickHouse, MongoDB, PostgreSQL, Redis,
+Apache Airflow и фасад на Panel (HoloViz).
 
 Контракты — источник истины: `specs/001-sputnik-data-portal/contracts/*.yaml`.
 План и задачи: `specs/001-sputnik-data-portal/plan.md`, `tasks.md`.
@@ -46,6 +47,10 @@ http://localhost:8000/docs. Остановить: `docker compose --profile base
 | Redpanda Console | 8080 | Prometheus | 9090 |
 | Grafana | 3000 | MinIO Console | 9001 |
 | ClickHouse | 8123 | PostgreSQL | 5432 |
+
+> Хранилище озера — Silo (`pgsty/silo`) с Docker Hub: официальные образы MinIO
+> удалены из Docker Hub, а Quay закрыл анонимный доступ в 2026. S3 API,
+> переменные `MINIO_*` и консоль на `9001` сохранены.
 
 Порт Grafana можно переопределить: `GRAFANA_PORT=3300 docker compose --profile adv up -d`.
 

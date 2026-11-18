@@ -169,7 +169,10 @@ services:
     restart: unless-stopped
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2024-06-13T22-53-53Z
+    # Официальные образы MinIO удалены с Docker Hub, а Quay закрыл анонимный
+    # доступ в 2026. Silo — поддерживаемый форк MinIO: тот же S3 API,
+    # переменные MINIO_*, формат данных и консоль на :9001.
+    image: pgsty/silo:RELEASE.2026-11-12T00-00-00Z
     profiles: *profiles-adv
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
@@ -181,14 +184,14 @@ services:
     volumes:
       - miniodata:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
   minio-init:
-    image: quay.io/minio/mc:RELEASE.2024-06-12T14-34-03Z
+    image: pgsty/mc:RELEASE.2026-11-12T00-00-00Z
     profiles: *profiles-adv
     depends_on:
       minio:
@@ -199,7 +202,7 @@ services:
       mc mb --ignore-existing local/lake &&
       mc mb --ignore-existing local/samples &&
       mc mb --ignore-existing local/exports &&
-      echo 'MinIO buckets ready';
+      echo 'S3 buckets ready (silo)';
       "
 
   clickhouse:

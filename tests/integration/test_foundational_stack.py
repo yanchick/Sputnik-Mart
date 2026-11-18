@@ -205,7 +205,7 @@ def test_minio_bootstrap_buckets_and_prefixes() -> None:
     from testcontainers.core.wait_strategies import HttpWaitStrategy
 
     container = (
-        DockerContainer("quay.io/minio/minio:RELEASE.2024-06-13T22-53-53Z")
+        DockerContainer("pgsty/silo:RELEASE.2026-11-12T00-00-00Z")
         .with_exposed_ports(9000)
         .with_env("MINIO_ROOT_USER", "minioadmin")
         .with_env("MINIO_ROOT_PASSWORD", "minioadmin")
